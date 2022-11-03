@@ -1,99 +1,165 @@
-[TIP]
-.Using the CLI
-====
-If you are creating your project using the Micronaut CLI, supply one of `micrometer-atlas`, `micrometer-graphite`, `micrometer-prometheus`, or `micrometer-statsd` features to enable metrics and preconfigure the selected registry in your project:
+== Metric Concepts
+
+Key Micrometer https://micrometer.io/docs/concepts[concepts] include a https://micrometer.io/docs/concepts#_registry[MeterRegistry] to register and use meters.
+A https://micrometer.io/docs/concepts#_meters[Meter] is something that produces metrics.
+
+A MeterRegistry can have some customizations automatically applied.
+
+=== Meter Registry Configurer
+
+* Any bean that implements `MeterRegistryConfigurer` gets applied to every _applicable_ MeterRegistry bean on creation
+* The implementation of the MeterRegistryConfigurer `supports()` method determines if the configurer is applied to a particular registry
+** If you want all registries to get the customization, return `true`
+** Otherwise, you can evaluate the registry for its class type, class hierarchy, or other criteria.
+** Remember you only get one shot for autoconfiguration; i.e. when the bean context is started.
+** However, in code you can apply additional customizations to the registry config.
+
+.MeterRegistryConfigurer Interface
+[source,java]
 ----
-$ mn create-app my-app --features micrometer-atlas
+include::{metricscore}/aggregator/MeterRegistryConfigurer.java[]
 ----
-====
 
-The metrics endpoint returns information about the "metrics" of the application. To execute the endpoint, send a GET request to `/metrics`. This returns the metric names registered with the `MeterRegistry` bean.
+.Example
+[source,java]
+----
+include::{testsmetricscore}/SimpleMeterRegistryConfigurer.java[]
+----
 
-You can get specific metrics by using `/metrics/[name]`, for example `/metrics/jvm.memory.used`. This would return something like:
+=== Meter Filter
 
-.Sample Metric Detail Json
-```json
-{
-  "name": "jvm.memory.used",
-  "measurements": [
-    {
-      "statistic": "VALUE",
-      "value": 1.45397552E8
-    }
-  ],
-  "availableTags": [
-    {
-      "tag": "area",
-      "values": [
-        "heap",
-        "nonheap"
-      ]
-    },
-    {
-      "tag": "id",
-      "values": [
-        "Compressed Class Space",
-        "PS Survivor Space",
-        "PS Old Gen",
-        "Metaspace",
-        "PS Eden Space",
-        "Code Cache"
-      ]
-    }
-  ]
-}
-```
+* A https://micrometer.io/docs/concepts#_meter_filters[meter filter] can be used to determine if a Meter is to be added to the registry.
+* Any bean that implements `MeterFilter` will be applied to all registries when the registry is first created
 
-You can further limit the metric by using a tag like `/metrics/jvm.memory.used?tag=id:PS%20Old%20Gen`.
+You can create custom filters similar to the following inside your application. `MeterFilter` provides several convenience methods to help with the creation of these filters.
 
-.Sample Metric Detail Json
-```json
-{
-  "name": "jvm.memory.used",
-  "measurements": [
-    {
-      "statistic": "VALUE",
-      "value": 1.1434488E7
-    }
-  ],
-  "availableTags": [
-    {
-      "tag": "area",
-      "values": [
-        "heap"
-      ]
-    }
-  ]
-}
-```
+.Example
+[source,java]
+----
+include::{testsmetricscore}/MeterFilterFactory.java[]
+----
 
-You may even use multiple or nested tags, for example `/metrics/jvm.memory.used?tag=id:PS%20Old%20Gen&tag=area:heap`.
+=== Meter Binder
 
-.Sample Metric Detail Json
-```json
-{
-  "name": "jvm.memory.used",
-  "measurements": [
-    {
-      "statistic": "VALUE",
-      "value": 1.1434488E7
-    }
-  ]
-}
-```
+Meter Binders get applied to Meter Registry to _mix in_ metrics producers. Micrometer defines several of these for cross-cutting metrics related to JVM metrics, caches, classloaders, etc. These implement `MeterBinder`, but they are not autowired as beans; manual wiring is required given how Micrometer is currently implemented.
 
-== Configuration
+==== Provided Binders
 
-Currently, the metrics endpoint is only enabled if you include the `micrometer-core` (or one of the typed registries such as `micrometer-registry-statsd`, `micrometer-registry-graphite`, etc.) AND the `management` dependencies. You must also enable the global metrics flag (`true` by default).
+The following metrics currently have binders and are enabled by default. The settings listed below can disable individual metric binders if you do not wish to collect or report those metrics.
 
-.Property
+===== JVM Metrics
 
+The JVM metrics bindings provide several JVM metrics.
+
+*Control Property*: `micronaut.metrics.binders.jvm.enabled`
+
+.Metrics provided
+|=======
+|*Name*
+| jvm.buffer.count
+| jvm.buffer.memory.used
+| jvm.buffer.total.capacity
+| jvm.classes.loaded
+| jvm.classes.unloaded
+| jvm.gc.live.data.size
+| jvm.gc.max.data.size
+| jvm.gc.memory.allocated
+| jvm.gc.memory.promoted
+| jvm.memory.committed
+| jvm.memory.max
+| jvm.memory.used
+| jvm.threads.daemon
+| jvm.threads.live
+| jvm.threads.peak
+|=======
+
+===== Web Metrics
+
+There is a default web filter provided for web metrics. All routes, status codes, methods, and exceptions are timed and counted.
+
+*Control Property*: `micronaut.metrics.binders.web.enabled`
+
+.Filter Path
+If enabled, by default the path `/**` is intercepted. To change which paths are run through the filter for the server, set `micronaut.metrics.http.path`. For the client, set `micronaut.metrics.http.client.path`.
+
+.Metrics provided
+|=======
+|*Name*
+| http.server.requests
+| http.client.requests
+|=======
+
+===== System Metrics
+
+There are multiple metrics that can be separately toggled.
+
+====== Uptime Metrics
+
+The uptime metrics bindings provide system uptime metrics.
+
+*Control Property*: `micronaut.metrics.binders.uptime.enabled`
+
+.Metrics provided
+|=======
+|*Name*
+| process.uptime
+| process.start.time
+|=======
+
+===== Processor Metrics
+
+The processor metrics bindings provide system processor metrics.
+
+*Control Property*: `micronaut.metrics.binders.processor.enabled`
+
+.Metrics provided
+|=======
+|*Name*
+| system.load.average.1m
+| system.cpu.usage
+| system.cpu.count
+| process.cpu.usage
+|=======
+
+===== File Descriptor Metrics
+
+The file descriptor metrics bindings provide system file descriptor metrics.
+
+*Control Property*: `micronaut.metrics.binders.files.enabled`
+
+.Metrics provided
+|=======
+|*Name*
+| process.files.open
+| process.files.max
+|=======
+
+===== Logback Metrics
+
+The logging metrics bindings provide logging metrics if using https://logback.qos.ch/[Logback].
+
+*Control Property*: `micronaut.metrics.binders.logback.enabled`
+
+.Metrics provided
+|=======
+|*Name*
+| logback.events
+|=======
+
+===== Hibernate Metrics
+
+You can enable metrics for https://hibernate.org/orm/[Hibernate] by setting the `hibernate.generate_statistics` property to `true` in configuration. For example, for the default entity manager:
+
+Enabling Hibernate Metrics
 [source,yaml]
 ----
-micronaut:
-  metrics:
-    enabled: true
+jpa:
+  default:
+    properties:
+      hibernate:
+        generate_statistics: true
 ----
+https://github.com/hibernate/hibernate-orm/blob/main/hibernate-micrometer/src/main/java/org/hibernate/stat/HibernateMetrics.java[HibernateMetrics] needs to be on the classpath, so https://mvnrepository.com/artifact/org.hibernate/hibernate-micrometer[hibernate-micrometer] should be downloaded:
 
 .Gradle
 
@@ -101,44 +167,85 @@ micronaut:
 ----
 dependencies {
     ...
-    implementation "io.micronaut.micrometer:micronaut-micrometer-core"
-    // micrometer-registry-statsd also pulls in micrometer-core so included above to verbose example
-    implementation "io.micronaut.micrometer:micronaut-micrometer-registry-statsd"
-    // Also required to enable endpoint
-    implementation "io.micronaut:micronaut-management"
+    implementation("org.hibernate:hibernate-micrometer")
     ...
 }
 ----
+Micrometer automatically exposes Hibernate statistics. See the source code for https://github.com/hibernate/hibernate-orm/blob/main/hibernate-micrometer/src/main/java/org/hibernate/stat/HibernateMetrics.java[HibernateMetrics] for the available metrics.
 
-.Maven
-[source,xml]
+===== DataSource Metrics
+
+The `DataSource` metrics bindings provide data source pool metrics.
+
+*Control Property*: `micronaut.metrics.binders.jdbc.enabled`
+
+NOTE: There is a different set of pool metric names for HikariCP and other pool providers.
+
+If you use `io.micronaut.sql:micronaut-jdbc-hikari` you will get additional pool metrics, as HikariCP has built-in support for meter registries.
+
+.HikariCP Metrics Provided
+|=======
+|*Name*
+| hikaricp.connections.idle
+| hikaricp.connections.pending
+| hikaricp.connections
+| hikaricp.connections.active
+| hikaricp.connections.creation
+| hikaricp.connections.max
+| hikaricp.connections.min
+| hikaricp.connections.usage
+| hikaricp.connections.timeout
+| hikaricp.connections.acquire
+|=======
+
+If you use `io.micronaut.sql:micronaut-jdbc-tomcat` or `io.micronaut.sql:micronaut-jdbc-dbcp`, you will get the following metrics
+
+.Generic Pool Metrics provided
+|=======
+|*Name*
+| jdbc.connections.usage
+| jdbc.connections.active
+| jdbc.connections.max
+| jdbc.connections.min
+|=======
+
+===== Netty Server Metrics
+
+Currently, the following binders are provided to instrument Netty server:
+
+* *EventLoopGroupFactoryBinder*: Instrument and expose event loop group queues metrics; use `micronaut.metrics.binders.netty.queues.enabled` to toggle. Default is *false*. The queues' size and tasks wait and execution time are exposed.
+* *ByteBufAllocatorMetricsBinder*: Expose `ByteBuf` default allocators (https://netty.io/4.1/api/io/netty/buffer/ByteBufAllocatorMetric.html[UnpooledByteBufAllocator], https://netty.io/4.1/api/io/netty/buffer/PooledByteBufAllocatorMetric.html[PooledByteBufAllocator]) metrics; use `micronaut.metrics.binders.netty.bytebuf-allocators.enabled` to toggle. Default is *false*.
+You can customize what metrics are exposed using `micronaut.metrics.binders.netty.bytebuf-allocators.metrics`. By default, all available metrics are exposed. These flags are supported:
+** `POOLED_ALLOCATOR`: expose `PooledByteBufAllocator` metrics,
+** `UNPOOLED_ALLOCATOR`: expose `UnpooledByteBufAllocator` metrics,
+** `POOLED_ARENAS`: expose `PooledByteBufAllocator` pooled arenas metrics (requires `POOLED_ALLOCATOR`),
+** `POOLED_ARENAS_SUBPAGES`: expose `PooledByteBufAllocator` pooled arenas sub pages metrics (requires `POOLED_ARENAS`),
+** `POOLED_ARENAS_CHUNKLISTS`: expose `PooledByteBufAllocator` pooled arenas chunk lists metrics (requires `POOLED_ARENAS`),
+** `POOLED_ARENAS_CHUNKS`: expose `PooledByteBufAllocator` pooled arenas chunks metrics (requires `POOLED_ARENAS_CHUNKLISTS`).
+* *NettyMetricsPipelineBinder*: Instrument Netty's channel, use `micronaut.metrics.binders.netty.channels.enabled` to toggle. Default is *false*.
+The provided metrics include the channel count, current active channel count, channel error count, bytes read and written.
+
+== Adding Custom Metrics
+
+To add metrics to your application, dependency-inject a `MeterRegistry` bean and use the provided methods to access counters, timers, etc.
+
+See the https://micrometer.io/docs[Micrometer docs] for more information.
+
+.Custom Metrics Example
+[source,java]
 ----
-<dependency>
-  <groupId>io.micronaut.micrometer</groupId>
-  <artifactId>micronaut-micrometer-core</artifactId>
-  <version>${micronaut.version}</version>
-</dependency>
-<!-- micrometer-registry-statsd also pulls in micrometer-core so included above to verbose example -->
-<dependency>
-  <groupId>io.micronaut.micrometer</groupId>
-  <artifactId>micronaut-micrometer-registry-statsd</artifactId>
-  <version>${micronaut.version}</version>
-</dependency>
-<!-- Also required to enable endpoint -->
-<dependency>
-  <groupId>io.micronaut</groupId>
-  <artifactId>micronaut-management</artifactId>
-  <version>${micronaut.version}</version>
-</dependency>
+include::{testsmetricscore}/IndexController.java[]
 ----
 
-To configure the metrics endpoint, supply configuration through `endpoints.metrics`.
+== Custom Exception Metrics
 
-.Metrics Endpoint Configuration Example
-[source,yaml]
+To report on response codes for custom handled exceptions, implement `io.micronaut.http.HttpResponseProvider`.
+The default value reported for an `ExceptionHandler` is 500.
+
+See the https://docs.micronaut.io/latest/guide/[Micronaut docs] for more information on `ExceptionHandler`.
+
+.ExceptionHandler Reporting Example
+[source,java]
 ----
-endpoints:
-  metrics:
-    enabled: Boolean
-    sensitive: Boolean
+include::{testsmetricscore}/OutOfStockException.java[]
 ----
